@@ -17,6 +17,7 @@ limitations under the License.
 package vgpu
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
@@ -196,28 +198,52 @@ func (gs *GPUDevices) GetStatus() string {
 	return ""
 }
 
+func (gs *GPUDevices) Bind(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+	klog.V(4).Infoln("VGPU DeviceSharing:Into Bind")
+	if VGPUEnable {
+		nodelock.UseClient(kubeClient)
+		ts := time.Now()
+		err := nodelock.LockNode(gs.Name, DeviceName)
+		for err != nil {
+			err = nodelock.LockNode(gs.Name, DeviceName)
+			time.Sleep(time.Second * 2)
+			if time.Since(ts) > time.Duration(time.Minute*5) {
+				break
+			}
+		}
+		if err != nil {
+			return errors.Errorf("node %s locked for lockname gpushare %s", gs.Name, err.Error())
+		}
+		podnew, err := kubeClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		newannos := make(map[string]string)
+		newannos[AssignedIDsToAllocateAnnotations] = podnew.Annotations[AssignedIDsAnnotations]
+		newannos[BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+		err = patchPodAnnotations(pod, newannos)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (gs *GPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error {
-	klog.V(3).Infoln("VGPU DeviceSharing:Into AllocateToPod", pod.Name)
+	klog.V(4).Infoln("VGPU DeviceSharing:Into AllocateToPod", pod.Name)
 	if VGPUEnable {
 		fit, device, err := checkNodeGPUSharingPredicate(pod, gs, false)
 		if err != nil || !fit {
 			klog.Errorln("DeviceSharing err=", err.Error())
 			return err
 		}
-		nodelock.UseClient(kubeClient)
-		err = nodelock.LockNode(gs.Name, DeviceName)
-		if err != nil {
-			return errors.Errorf("node %s locked for lockname gpushare %s", gs.Name, err.Error())
-		}
 
 		annotations := make(map[string]string)
 		annotations[AssignedNodeAnnotations] = gs.Name
 		annotations[AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 		annotations[AssignedIDsAnnotations] = encodePodDevices(device)
-		annotations[AssignedIDsToAllocateAnnotations] = annotations[AssignedIDsAnnotations]
 
 		annotations[DeviceBindPhase] = "allocating"
-		annotations[BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 		err = patchPodAnnotations(pod, annotations)
 		if err != nil {
 			return err

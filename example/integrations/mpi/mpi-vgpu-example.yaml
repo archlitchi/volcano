@@ -9,7 +9,7 @@ spec:
     ssh: []
     svc: []
   tasks:
-    - replicas: 1
+    - replicas: 2
       name: mpimaster
       policies:
         - event: TaskCompleted
@@ -23,7 +23,7 @@ spec:
                 - |
                   MPI_HOST=`cat /etc/volcano/mpiworker.host | tr "\n" ","`;
                   mkdir -p /var/run/sshd; /usr/sbin/sshd;
-                  mpiexec --allow-run-as-root --host ${MPI_HOST} -np 2 mpi_hello_world;
+                  sleep infinity;
               image: volcanosh/example-mpi:0.0.3
               name: mpimaster
               ports:
@@ -34,7 +34,7 @@ spec:
                 limits:
                   volcano.sh/vgpu-number: 1
                   volcano.sh/vgpu-memory: 1024
-          restartPolicy: OnFailure
+          restartPolicy: Always
     - replicas: 2
       name: mpiworker
       template:
@@ -51,5 +51,9 @@ spec:
                 - containerPort: 22
                   name: mpijob-port
               workingDir: /home
+              resources:
+                limits:
+                  volcano.sh/vgpu-number: 1
+                  volcano.sh/vgpu-memory: 1024
           restartPolicy: OnFailure
 ---

@@ -387,6 +387,14 @@ func (s *Statement) Commit() {
 		case Pipeline:
 			s.pipeline(op.task)
 		case Allocate:
+			for _, eh := range s.ssn.eventHandlers {
+				if eh.BindFunc != nil {
+					eh.BindFunc(&Event{
+						Task: op.task,
+					})
+				}
+			}
+
 			err := s.allocate(op.task)
 			if err != nil {
 				s.ssn.cache.RevertVolumes(op.task, op.task.PodVolumes)

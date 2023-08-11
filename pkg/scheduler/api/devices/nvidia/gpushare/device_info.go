@@ -172,6 +172,9 @@ func (gs *GPUDevices) GetStatus() string {
 	return ""
 }
 
+func (gs *GPUDevices) Bind(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+	return nil
+}
 func (gs *GPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error {
 	klog.V(4).Infoln("DeviceSharing:Into AllocateToPod", pod.Name)
 	if getGPUMemoryOfPod(pod) > 0 {

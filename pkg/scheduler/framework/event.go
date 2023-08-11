@@ -28,5 +28,6 @@ type Event struct {
 // EventHandler structure
 type EventHandler struct {
 	AllocateFunc   func(event *Event)
+	BindFunc       func(event *Event)
 	DeallocateFunc func(event *Event)
 }

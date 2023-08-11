@@ -233,6 +233,38 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 
 	// Register event handlers to update task info in PodLister & nodeMap
 	ssn.AddEventHandler(&framework.EventHandler{
+		BindFunc: func(event *framework.Event) {
+			klog.V(3).Infoln("predicates, bindFunc", event.Task.NodeName)
+			pod := pl.UpdateTask(event.Task, event.Task.NodeName)
+			nodeName := event.Task.NodeName
+			_, found := nodeMap[nodeName]
+			if !found {
+				klog.Errorf("predicates, update pod %s/%s allocate to NOT EXIST node [%s]", pod.Namespace, pod.Name, nodeName)
+				return
+			}
+			nodeInfo, ok := ssn.Nodes[nodeName]
+			if !ok {
+				klog.Errorf("Failed to get node %s info from cache", nodeName)
+				return
+			}
+			//predicate gpu sharing
+			for _, val := range api.RegisteredDevices {
+				if devices, ok := nodeInfo.Others[val].(api.Devices); ok {
+					if !devices.HasDeviceRequest(pod) {
+						continue
+					}
+
+					err := devices.Bind(ssn.KubeClient(), pod)
+					if err != nil {
+						klog.Errorf("Bind failed %s", err.Error())
+						return
+					}
+				} else {
+					klog.Warningf("Devices %s assertion conversion failed, skip", val)
+				}
+			}
+			klog.V(4).Infof("predicates, update pod %s/%s bind to node [%s]", pod.Namespace, pod.Name, nodeName)
+		},
 		AllocateFunc: func(event *framework.Event) {
 			klog.V(4).Infoln("predicates, allocate", event.Task.NodeName)
 			pod := pl.UpdateTask(event.Task, event.Task.NodeName)

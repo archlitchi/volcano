@@ -60,6 +60,8 @@ type Devices interface {
 	FilterNode(pod *v1.Pod) (int, string, error)
 	//Allocate action in predicate
 	Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error
+	//Bind action in predicate
+	Bind(kubeClient kubernetes.Interface, pod *v1.Pod) error
 	//Release action in predicate
 	Release(kubeClient kubernetes.Interface, pod *v1.Pod) error
 
