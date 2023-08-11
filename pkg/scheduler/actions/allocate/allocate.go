@@ -271,6 +271,7 @@ func (alloc *Action) Execute(ssn *framework.Session) {
 					}
 				}
 			}
+
 			if ssn.JobReady(job) && !tasks.Empty() {
 				jobs.Push(job)
 				break
