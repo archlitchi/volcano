@@ -230,9 +230,15 @@ func (alloc *Action) Execute(ssn *framework.Session) {
 					bestNode = nodes[0]
 				case len(nodes) > 1: // If more than one node after predicate, using "the best" one
 					nodeScores := util.PrioritizeNodes(task, nodes, ssn.BatchNodeOrderFn, ssn.NodeOrderMapFn, ssn.NodeOrderReduceFn)
-
+					for idx, val := range nodeScores {
+						klog.Infoln("nodeScores= idx", idx)
+						for _, val1 := range val {
+							klog.Info("name=", val1.Name)
+						}
+					}
 					bestNode = ssn.BestNodeFn(task, nodeScores)
 					if bestNode == nil {
+						klog.Infoln("Select default bestNode")
 						bestNode = util.SelectBestNode(nodeScores)
 					}
 				}

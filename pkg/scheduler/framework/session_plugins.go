@@ -17,6 +17,7 @@ limitations under the License.
 package framework
 
 import (
+	"k8s.io/klog"
 	k8sframework "k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"volcano.sh/apis/pkg/apis/scheduling"
@@ -688,6 +689,7 @@ func (ssn *Session) NodeOrderFn(task *api.TaskInfo, node *api.NodeInfo) (float64
 // BatchNodeOrderFn invoke node order function of the plugins
 func (ssn *Session) BatchNodeOrderFn(task *api.TaskInfo, nodes []*api.NodeInfo) (map[string]float64, error) {
 	priorityScore := make(map[string]float64, len(nodes))
+	klog.Infoln("--------------------BatchNodeOriderFn=-=-=------------------")
 	for _, tier := range ssn.Tiers {
 		for _, plugin := range tier.Plugins {
 			if !isEnabled(plugin.EnabledNodeOrder) {

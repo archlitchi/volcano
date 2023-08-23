@@ -1,8 +1,15 @@
 package networktopology
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"strings"
+
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+	"volcano.sh/volcano/pkg/scheduler/api"
+	"volcano.sh/volcano/pkg/scheduler/framework"
 )
 
 type edge struct {
@@ -17,15 +24,27 @@ type node struct {
 
 type nodeArray []node
 
-func init() {
-	n := initYanChengTopo()
-	connectNode(n)
-	encodestr, err := json.Marshal(n)
-	fmt.Println("Nodes=")
-	if err == nil {
-		fmt.Println(string(encodestr))
-	} else {
-		fmt.Println("err=", err.Error())
+var na nodeArray
+var distance [][]int32
+
+func initialDistance() {
+	distance = make([][]int32, len(na))
+	for row := range distance {
+		distance[row] = make([]int32, len(na))
+		for col := range distance {
+			if row == col {
+				distance[row][col] = 0
+			} else {
+				distance[row][col] = 10000
+			}
+		}
+		for _, col := range na[row].Connect {
+			dst, err := getidbyname(col.Dest)
+			if err != nil {
+				break
+			}
+			distance[row][dst] = int32(col.Weight)
+		}
 	}
 }
 
@@ -77,10 +96,96 @@ func connectNode(n nodeArray) error {
 	return nil
 }
 
-func elect() string {
-	return ""
+func sort() {
+	for mid := range distance {
+		for left := range distance {
+			for right := range distance {
+				if distance[left][mid]+distance[mid][right] < distance[left][right] {
+					distance[left][right] = distance[left][mid] + distance[mid][right]
+				}
+			}
+		}
+	}
 }
 
-func distance(n1 string, n2 string) float64 {
-	return 0
+func getidbyname(n string) (int, error) {
+	for idx, val := range na {
+		if strings.Compare(n, val.ID) == 0 {
+			return idx, nil
+		}
+	}
+	return 0, errors.New("node not found")
+}
+
+func elect(nodes []*api.NodeInfo) string {
+	sum := float64(0)
+	min := float64(2000000000)
+	pick := ""
+	for _, val := range nodes {
+		sum = 0
+		for _, val1 := range nodes {
+			sum += val.Idle.ScalarResources["nvidia.com/gpu"] * float64(getDistance(val.Name, val1.Name))
+		}
+		if min > sum {
+			min = sum
+			pick = val.Name
+		}
+	}
+	return pick
+}
+
+func getDistance(n1 string, n2 string) float64 {
+	node1, _ := getidbyname(n1)
+	node2, _ := getidbyname(n2)
+	return float64(distance[node1][node2])
+}
+
+func encode(nr nodeArray) (string, error) {
+	bytes, err := json.Marshal(nr)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+func importGraph(ssn *framework.Session, cm string) error {
+	na = nodeArray{}
+	cfg, err := ssn.KubeClient().CoreV1().ConfigMaps("default").Get(context.Background(), cm, v1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal([]byte(cfg.Data["topo.json"]), &na)
+	if err != nil {
+		return err
+	}
+
+	initialDistance()
+	sort()
+	encodestr, err := json.Marshal(na)
+	if err == nil {
+		klog.V(3).Infoln(string(encodestr))
+	} else {
+		klog.Errorln("err=", err.Error())
+	}
+
+	return nil
+}
+
+func exportGraph(ji *api.JobInfo) (nodeArray, error) {
+	tmp := nodeArray{}
+	for _, val := range ji.Tasks {
+		n := node{
+			ID:      val.Name,
+			Type:    0,
+			Connect: []edge{},
+		}
+		for _, val1 := range ji.Tasks {
+			n.Connect = append(n.Connect, edge{
+				Dest:   val1.Name,
+				Weight: uint(getDistance(val.NodeName, val1.NodeName)),
+			})
+		}
+		tmp = append(tmp, n)
+	}
+	return tmp, nil
 }
