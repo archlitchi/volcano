@@ -28,6 +28,7 @@ import (
 	"volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 
 	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/gpushare"
+	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/teco"
 	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/vgpu"
 )
 
@@ -348,6 +349,7 @@ func (ni *NodeInfo) setNodeOthersResource(node *v1.Node) {
 	IgnoredDevicesList = []string{}
 	ni.Others[GPUSharingDevice] = gpushare.NewGPUDevices(ni.Name, node)
 	ni.Others[vgpu.DeviceName] = vgpu.NewGPUDevices(ni.Name, node)
+	ni.Others[teco.DeviceName] = teco.NewTecoDevices(ni.Name, node)
 	IgnoredDevicesList = append(IgnoredDevicesList, ni.Others[GPUSharingDevice].(Devices).GetIgnoredDevices()...)
 	IgnoredDevicesList = append(IgnoredDevicesList, ni.Others[vgpu.DeviceName].(Devices).GetIgnoredDevices()...)
 }
@@ -494,12 +496,14 @@ func (ni *NodeInfo) RemoveTask(ti *TaskInfo) error {
 func (ni *NodeInfo) addResource(pod *v1.Pod) {
 	ni.Others[GPUSharingDevice].(Devices).AddResource(pod)
 	ni.Others[vgpu.DeviceName].(Devices).AddResource(pod)
+	ni.Others[teco.DeviceName].(Devices).AddResource(pod)
 }
 
 // subResource is used to subtract sharable devices
 func (ni *NodeInfo) subResource(pod *v1.Pod) {
 	ni.Others[GPUSharingDevice].(Devices).SubResource(pod)
 	ni.Others[vgpu.DeviceName].(Devices).SubResource(pod)
+	ni.Others[teco.DeviceName].(Devices).SubResource(pod)
 }
 
 // UpdateTask is used to update a task in nodeInfo object.

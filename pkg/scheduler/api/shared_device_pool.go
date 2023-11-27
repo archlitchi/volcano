@@ -22,6 +22,7 @@ import (
 
 	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/gpushare"
 	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/vgpu"
+	"volcano.sh/volcano/pkg/scheduler/api/devices/nvidia/teco"
 )
 
 const (
@@ -76,5 +77,5 @@ var _ Devices = new(gpushare.GPUDevices)
 var IgnoredDevicesList []string
 
 var RegisteredDevices = []string{
-	GPUSharingDevice, vgpu.DeviceName,
+	GPUSharingDevice, vgpu.DeviceName, teco.DeviceName,
 }
