@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -37,14 +36,6 @@ import (
 	"volcano.sh/volcano/pkg/scheduler/metrics"
 	"volcano.sh/volcano/pkg/scheduler/util"
 	commonutil "volcano.sh/volcano/pkg/util"
-)
-
-const (
-	// GateRemovalWorkerNumKey is the configuration key for number of async gate removal workers
-	GateRemovalWorkerNumKey = "gateRemovalWorkerNum"
-
-	// Default buffer size per worker for the gate removal channel
-	gateRemovalBufferPerWorker = 200
 )
 
 type allocateContext struct {
@@ -109,15 +100,11 @@ type Action struct {
 	enablePredicateErrorCache bool
 
 	recorder *Recorder
-
-	schGateManager *schGateManager
-	initOnce       sync.Once
 }
 
 func New() *Action {
 	return &Action{
 		enablePredicateErrorCache: true, // default to enable it
-		schGateManager:            newSchGateManager(5),
 	}
 }
 
@@ -125,22 +112,11 @@ func (alloc *Action) Name() string {
 	return "allocate"
 }
 
-func (alloc *Action) Initialize() {
-	if utilfeature.DefaultFeatureGate.Enabled(features.SchedulingGatesQueueAdmission) {
-		alloc.schGateManager.start()
-	}
-}
+func (alloc *Action) Initialize() {}
 
 func (alloc *Action) parseArguments(ssn *framework.Session) {
 	arguments := framework.GetArgOfActionFromConf(ssn.Configurations, alloc.Name())
 	arguments.GetBool(&alloc.enablePredicateErrorCache, conf.EnablePredicateErrCacheKey)
-	arguments.GetInt(&alloc.schGateManager.workerNum, GateRemovalWorkerNumKey)
-
-	// Ensure at least 1 worker
-	if alloc.schGateManager.workerNum < 1 {
-		klog.Warningf("Invalid gateRemovalWorkerNum %d, using default value 5", alloc.schGateManager.workerNum)
-		alloc.schGateManager.workerNum = 5
-	}
 }
 
 func (alloc *Action) Execute(ssn *framework.Session) {
@@ -148,13 +124,6 @@ func (alloc *Action) Execute(ssn *framework.Session) {
 	defer klog.V(5).Infof("Leaving Allocate ...")
 
 	alloc.parseArguments(ssn)
-
-	// Initialize workers once with the configured number.
-	// Cache KubeClient for thread-safe access from workers.
-	alloc.initOnce.Do(func() {
-		alloc.schGateManager.kubeClient = ssn.KubeClient()
-		alloc.Initialize()
-	})
 
 	// the allocation for pod may have many stages
 	// 1. pick a queue named Q (using ssn.QueueOrderFn)
@@ -614,7 +583,7 @@ func (alloc *Action) allocateResourcesForTasks(subJob *api.SubJobInfo, tasks *ut
 		if utilfeature.DefaultFeatureGate.Enabled(features.SchedulingGatesQueueAdmission) &&
 			task.SchGated && api.HasQueueAllocationGateAnnotation(task.Pod) {
 			klog.V(3).Infof("Task %s/%s has the QueueAllocationGate, queue async gate removal", task.Namespace, task.Name)
-			alloc.schGateManager.enqueue(task)
+			ssn.SchGateManager().Enqueue(task)
 		}
 
 		// Skip gated tasks. If someone added the Volcano gate without the opt-in annotation,
@@ -676,7 +645,6 @@ func (alloc *Action) allocateResourcesForTasks(subJob *api.SubJobInfo, tasks *ut
 				fitErrors.SetHyperNode(hyperNode)
 			}
 			job.NodesFitErrors[task.UID] = fitErrors
-
 			// Assume that all left tasks are allocatable, but can not meet gang-scheduling min member,
 			// so we should break from continuously allocating.
 			// otherwise, should continue to find other allocatable task
@@ -855,6 +823,4 @@ func (alloc *Action) predicate(task *api.TaskInfo, node *api.NodeInfo) error {
 	return alloc.session.PredicateForAllocateAction(task, node)
 }
 
-func (alloc *Action) UnInitialize() {
-	alloc.schGateManager.stop()
-}
+func (alloc *Action) UnInitialize() {}

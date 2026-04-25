@@ -35,6 +35,12 @@ Add the following flag to both the `volcano-scheduler` and `volcano-admission` d
 --feature-gates=SchedulingGatesQueueAdmission=true
 ```
 
+Optionally, configure the number of async gate removal workers (default: 5):
+
+```yaml
+--gate-removal-worker-num=10
+```
+
 ## 2. Configure the Capacity Plugin
 
 Ensure the `capacity` plugin is enabled in your scheduler configuration. The reserved resource tracking that prevents race conditions between gate removal and pod allocation is implemented in this plugin.

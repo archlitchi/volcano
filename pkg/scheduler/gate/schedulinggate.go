@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-package allocate
+package gate
 
 import (
 	"sync"
@@ -26,37 +26,50 @@ import (
 	"volcano.sh/volcano/pkg/scheduler/cache"
 )
 
-// schGateManager handles asynchronous removal of Volcano scheduling gates from pods.
+const (
+	// DefaultWorkerNum is the default number of async gate removal workers.
+	DefaultWorkerNum = 5
+
+	// bufferPerWorker is the channel buffer size per worker.
+	bufferPerWorker = 200
+)
+
+// SchGateManager handles asynchronous removal of Volcano scheduling gates from pods.
 // When the SchedulingGatesQueueAdmission feature is enabled, pods opt in via the
 // scheduling.volcano.sh/queue-allocation-gate annotation. The webhook injects a scheduling
 // gate at creation time, and this manager removes it asynchronously after the queue capacity
 // check passes, allowing cluster autoscalers to see the Unschedulable condition only when
 // it reflects genuine cluster resource shortage rather than queue limits.
-type schGateManager struct {
-	kubeClient   kubernetes.Interface // Cached client for worker goroutines
-	opCh         chan schGateRemovalOperation
+type SchGateManager struct {
+	kubeClient   kubernetes.Interface
+	opCh         chan gateRemovalOp
 	workersWg    sync.WaitGroup
 	stopCh       chan struct{}
 	workerNum    int
 	shutdownOnce sync.Once
 }
 
-// schGateRemovalOperation is a request to remove the scheduling gate from a pod.
-type schGateRemovalOperation struct {
+type gateRemovalOp struct {
 	namespace string
 	name      string
 }
 
-func newSchGateManager(workerNum int) *schGateManager {
-	return &schGateManager{
-		stopCh:    make(chan struct{}),
-		workerNum: workerNum,
+// NewSchGateManager creates a new gate manager with the given client and worker count.
+func NewSchGateManager(kubeClient kubernetes.Interface, workerNum int) *SchGateManager {
+	if workerNum < 1 {
+		workerNum = DefaultWorkerNum
+	}
+	return &SchGateManager{
+		kubeClient: kubeClient,
+		stopCh:     make(chan struct{}),
+		workerNum:  workerNum,
 	}
 }
 
-func (m *schGateManager) start() {
-	channelSize := m.workerNum * gateRemovalBufferPerWorker
-	m.opCh = make(chan schGateRemovalOperation, channelSize)
+// Start launches the async gate removal workers.
+func (m *SchGateManager) Start() {
+	channelSize := m.workerNum * bufferPerWorker
+	m.opCh = make(chan gateRemovalOp, channelSize)
 
 	for i := 0; i < m.workerNum; i++ {
 		m.workersWg.Add(1)
@@ -65,7 +78,8 @@ func (m *schGateManager) start() {
 	klog.V(3).Infof("Started %d async workers for gate removal", m.workerNum)
 }
 
-func (m *schGateManager) stop() {
+// Stop shuts down all workers and waits for them to finish.
+func (m *SchGateManager) Stop() {
 	m.shutdownOnce.Do(func() {
 		close(m.stopCh)
 		m.workersWg.Wait()
@@ -76,7 +90,7 @@ func (m *schGateManager) stop() {
 	})
 }
 
-func (m *schGateManager) worker() {
+func (m *SchGateManager) worker() {
 	defer m.workersWg.Done()
 	for {
 		select {
@@ -93,13 +107,14 @@ func (m *schGateManager) worker() {
 	}
 }
 
-// enqueue queues an async gate removal for the given task.
-// Returns true if the operation was enqueued, false if the channel is full.
-func (m *schGateManager) enqueue(task *api.TaskInfo) bool {
+// Enqueue queues an async gate removal for the given task.
+// Returns true if the operation was enqueued, false if the channel is full or the task
+// does not have only the Volcano scheduling gate.
+func (m *SchGateManager) Enqueue(task *api.TaskInfo) bool {
 	if !api.HasOnlyVolcanoSchedulingGate(task.Pod) {
 		return false
 	}
-	op := schGateRemovalOperation{
+	op := gateRemovalOp{
 		namespace: task.Namespace,
 		name:      task.Name,
 	}

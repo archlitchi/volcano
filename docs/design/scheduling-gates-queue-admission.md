@@ -302,27 +302,24 @@ Note that gated tasks are **not** allocated in the same cycle, they are skipped 
 task will be picked up in the next scheduling cycle once the async worker has removed the gate and the informer cache
 reflects the updated pod state.
 
-To support asynchronous gate removal, the gate management infrastructure can be extracted into a dedicated
-`schGateManager` struct (in `pkg/scheduler/actions/allocate/schedulinggate.go`) to keep the `allocate` action clean:
+To support asynchronous gate removal, the gate management infrastructure could live in a dedicated
+`SchGateManager` struct in `pkg/scheduler/gate/schedulinggate.go`. The manager is owned by the
+`Scheduler` and its lifecycle is tied to the scheduler process. It should then be passed to each scheduling session via `OpenSession()` and accessed by the allocate
+action through `ssn.SchGateManager()`:
 
 ```go
-// schGateManager handles asynchronous removal of Volcano scheduling gates from pods.
-type schGateManager struct {
-    kubeClient   kubernetes.Interface
-    opCh         chan schGateRemovalOperation
-    workersWg    sync.WaitGroup
-    stopCh       chan struct{}
-    workerNum    int
-    shutdownOnce sync.Once
-}
-
-type schGateRemovalOperation struct {
-    namespace string
-    name      string
+// SchGateManager handles asynchronous removal of Volcano scheduling gates from pods.
+type SchGateManager struct {
+    kubeClient kubernetes.Interface
+    opCh       chan gateRemovalOp
+    workersWg  sync.WaitGroup
+    stopCh     chan struct{}
+    workerNum  int
+    // ...
 }
 
 // Background worker processes gate removal operations
-func (m *schGateManager) worker() {
+func (m *SchGateManager) worker() {
     defer m.workersWg.Done()
     for {
         select {
@@ -337,15 +334,19 @@ func (m *schGateManager) worker() {
 }
 ```
 
-The `Action` struct holds a reference to the manager:
+The `Scheduler` creates and owns the manager:
 
 ```go
-type Action struct {
-    session *framework.Session
-    // ...
-    schGateManager *schGateManager
-    initOnce       sync.Once
-}
+// In Scheduler.Run():
+pc.schGateManager = gate.NewSchGateManager(pc.cache.Client(), options.ServerOpts.GateRemovalWorkerNum)
+pc.schGateManager.Start()
+go func() {
+    <-stopCh
+    pc.schGateManager.Stop()
+}()
+
+// Passed to each session:
+ssn := framework.OpenSession(pc.cache, plugins, configurations, pc.schGateManager)
 ```
 
 ##### Queue Capacity Accounting for Ungated Pods
