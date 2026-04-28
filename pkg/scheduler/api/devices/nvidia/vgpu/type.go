@@ -60,10 +60,6 @@ const (
 var (
 	VGPUEnable     bool
 	NodeLockEnable bool
-	// SchedulePolicy controls per-device selection on a node — "binpack",
-	// "spread", or unset for legacy descending-index order. Set by the
-	// deviceshare plugin from deviceshare.SchedulePolicy and read at
-	// allocation time so the policy actually drives the device pick.
 	SchedulePolicy string
 )
 

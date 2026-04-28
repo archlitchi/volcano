@@ -433,16 +433,9 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 	return true, ctrdevs, score, nil
 }
 
-// sortedDeviceIndicesByPolicy returns device indices ordered for per-device
-// selection on a node. binpack prefers more-used GPUs first so subsequent pods
-// pack onto already-busy devices; spread prefers idle GPUs first; an unset or
-// unknown policy preserves the legacy descending-index order so behavior for
-// users who do not opt in is unchanged.
 func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
 	n := len(gs.Device)
 	idx := make([]int, 0, n)
-	// Tie-break by lower device index gives a strict total ordering, so the
-	// non-stable sort.Slice is sufficient for the policy branches.
 	switch schedulePolicy {
 	case binpackPolicy:
 		for i := range gs.Device {
@@ -467,10 +460,6 @@ func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
 			return idx[a] < idx[b]
 		})
 	default:
-		// Legacy descending-index order. Device map keys are dense 0..N-1
-		// (populated sequentially in decodeNodeDevices), so we can fill the
-		// slice in the desired order directly and skip the sort entirely —
-		// keeping the unset-policy hot path allocation-light.
 		for i := n - 1; i >= 0; i-- {
 			idx = append(idx, i)
 		}
@@ -484,11 +473,6 @@ func GPUScore(schedulePolicy string, device *GPUDevice) float64 {
 	case binpackPolicy:
 		score = binpackMultiplier * (float64(device.UsedMem) / float64(device.Memory))
 	case spreadPolicy:
-		// spread should reward nodes whose GPUs are idle (UsedNum == 0) so
-		// that node-level scoring agrees with the per-device pick, which also
-		// prefers idle GPUs. The previous condition `UsedNum == 1` produced a
-		// split-brain where node scoring favored already-shared GPUs while
-		// device selection favored idle ones.
 		if device.UsedNum == 0 {
 			score = spreadMultiplier
 		}

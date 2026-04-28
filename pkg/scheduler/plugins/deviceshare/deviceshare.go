@@ -111,9 +111,6 @@ func enablePredicate(dsp *deviceSharePlugin) {
 
 	args.GetString(&dsp.schedulePolicy, SchedulePolicyArgument)
 	args.GetInt(&dsp.scheduleWeight, ScheduleWeight)
-	// Mirror the policy onto the vgpu package so the per-node Allocate path
-	// can pick devices according to it. Without this, Allocate falls through
-	// to the legacy descending-index order regardless of configuration.
 	vgpu.SchedulePolicy = dsp.schedulePolicy
 
 	if gpushare.GpuSharingEnable && gpushare.GpuNumberEnable {
