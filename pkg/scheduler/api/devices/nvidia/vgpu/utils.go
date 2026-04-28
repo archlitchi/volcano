@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -368,7 +369,7 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 		}
 		klog.V(3).InfoS("Allocating device for container", "request", val)
 
-		for i := len(gs.Device) - 1; i >= 0; i-- {
+		for _, i := range sortedDeviceIndicesByPolicy(gs, schedulePolicy) {
 			klog.V(3).InfoS("Scoring pod request", "memReq", val.Memreq, "memPercentageReq", val.MemPercentagereq, "coresReq", val.Coresreq, "Nums", val.Nums, "Index", i, "ID", gs.Device[i].ID)
 			klog.V(3).InfoS("Current Device", "Index", i, "TotalMemory", gs.Device[i].Memory, "UsedMemory", gs.Device[i].UsedMem, "UsedCores", gs.Device[i].UsedCore, "replicate", replicate)
 			if gs.Device[i].Number <= uint(gs.Device[i].UsedNum) {
@@ -430,6 +431,39 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 		ctrdevs = append(ctrdevs, devs)
 	}
 	return true, ctrdevs, score, nil
+}
+
+// sortedDeviceIndicesByPolicy returns device indices ordered for per-device
+// selection on a node. binpack prefers more-used GPUs first so subsequent pods
+// pack onto already-busy devices; spread prefers idle GPUs first; an unset or
+// unknown policy preserves the legacy descending-index order so behavior for
+// users who do not opt in is unchanged.
+func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
+	idx := make([]int, 0, len(gs.Device))
+	for i := range gs.Device {
+		idx = append(idx, i)
+	}
+	switch schedulePolicy {
+	case binpackPolicy:
+		sort.SliceStable(idx, func(a, b int) bool {
+			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
+			if da.UsedMem != db.UsedMem {
+				return da.UsedMem > db.UsedMem
+			}
+			return idx[a] < idx[b]
+		})
+	case spreadPolicy:
+		sort.SliceStable(idx, func(a, b int) bool {
+			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
+			if da.UsedNum != db.UsedNum {
+				return da.UsedNum < db.UsedNum
+			}
+			return idx[a] < idx[b]
+		})
+	default:
+		sort.Sort(sort.Reverse(sort.IntSlice(idx)))
+	}
+	return idx
 }
 
 func GPUScore(schedulePolicy string, device *GPUDevice) float64 {
