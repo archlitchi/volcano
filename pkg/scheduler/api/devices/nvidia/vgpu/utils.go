@@ -439,13 +439,16 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 // unknown policy preserves the legacy descending-index order so behavior for
 // users who do not opt in is unchanged.
 func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
-	idx := make([]int, 0, len(gs.Device))
-	for i := range gs.Device {
-		idx = append(idx, i)
-	}
+	n := len(gs.Device)
+	idx := make([]int, 0, n)
+	// Tie-break by lower device index gives a strict total ordering, so the
+	// non-stable sort.Slice is sufficient for the policy branches.
 	switch schedulePolicy {
 	case binpackPolicy:
-		sort.SliceStable(idx, func(a, b int) bool {
+		for i := range gs.Device {
+			idx = append(idx, i)
+		}
+		sort.Slice(idx, func(a, b int) bool {
 			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
 			if da.UsedMem != db.UsedMem {
 				return da.UsedMem > db.UsedMem
@@ -453,7 +456,10 @@ func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
 			return idx[a] < idx[b]
 		})
 	case spreadPolicy:
-		sort.SliceStable(idx, func(a, b int) bool {
+		for i := range gs.Device {
+			idx = append(idx, i)
+		}
+		sort.Slice(idx, func(a, b int) bool {
 			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
 			if da.UsedNum != db.UsedNum {
 				return da.UsedNum < db.UsedNum
@@ -461,7 +467,13 @@ func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
 			return idx[a] < idx[b]
 		})
 	default:
-		sort.Sort(sort.Reverse(sort.IntSlice(idx)))
+		// Legacy descending-index order. Device map keys are dense 0..N-1
+		// (populated sequentially in decodeNodeDevices), so we can fill the
+		// slice in the desired order directly and skip the sort entirely —
+		// keeping the unset-policy hot path allocation-light.
+		for i := n - 1; i >= 0; i-- {
+			idx = append(idx, i)
+		}
 	}
 	return idx
 }
@@ -472,7 +484,12 @@ func GPUScore(schedulePolicy string, device *GPUDevice) float64 {
 	case binpackPolicy:
 		score = binpackMultiplier * (float64(device.UsedMem) / float64(device.Memory))
 	case spreadPolicy:
-		if device.UsedNum == 1 {
+		// spread should reward nodes whose GPUs are idle (UsedNum == 0) so
+		// that node-level scoring agrees with the per-device pick, which also
+		// prefers idle GPUs. The previous condition `UsedNum == 1` produced a
+		// split-brain where node scoring favored already-shared GPUs while
+		// device selection favored idle ones.
+		if device.UsedNum == 0 {
 			score = spreadMultiplier
 		}
 	default:

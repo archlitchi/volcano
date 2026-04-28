@@ -92,6 +92,26 @@ func TestUnsetPolicyPreservesLegacyOrder(t *testing.T) {
 	}
 }
 
+// TestGPUScoreSpreadRewardsIdleGPU verifies the node-level scoring agrees with
+// the per-device pick: under spread, an idle GPU (UsedNum == 0) must score
+// higher than a partially-used GPU. The previous implementation rewarded
+// UsedNum == 1, producing a split-brain where node scoring picked a node with
+// shared GPUs while the per-device pick on that node would prefer an idle GPU.
+func TestGPUScoreSpreadRewardsIdleGPU(t *testing.T) {
+	idle := &GPUDevice{UsedNum: 0, UsedMem: 0, Memory: 16384}
+	shared := &GPUDevice{UsedNum: 1, UsedMem: 4096, Memory: 16384}
+	full := &GPUDevice{UsedNum: 4, UsedMem: 16384, Memory: 16384}
+
+	if GPUScore(spreadPolicy, idle) <= GPUScore(spreadPolicy, shared) {
+		t.Errorf("spread: idle GPU must score higher than shared GPU, got idle=%f shared=%f",
+			GPUScore(spreadPolicy, idle), GPUScore(spreadPolicy, shared))
+	}
+	if GPUScore(spreadPolicy, idle) <= GPUScore(spreadPolicy, full) {
+		t.Errorf("spread: idle GPU must score higher than full GPU, got idle=%f full=%f",
+			GPUScore(spreadPolicy, idle), GPUScore(spreadPolicy, full))
+	}
+}
+
 // TestBinpackStacksSequentialPods reproduces the user's bug: with policy=binpack,
 // three pods scheduled in sequence onto a node with three idle GPUs should all
 // land on the same GPU (filling it before opening a new one), not spread across
