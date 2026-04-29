@@ -111,6 +111,7 @@ func enablePredicate(dsp *deviceSharePlugin) {
 
 	args.GetString(&dsp.schedulePolicy, SchedulePolicyArgument)
 	args.GetInt(&dsp.scheduleWeight, ScheduleWeight)
+	vgpu.SchedulePolicy = dsp.schedulePolicy
 
 	if gpushare.GpuSharingEnable && gpushare.GpuNumberEnable {
 		klog.Fatal("can not define true in both gpu sharing and gpu number")

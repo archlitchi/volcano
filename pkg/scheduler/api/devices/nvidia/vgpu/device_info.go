@@ -295,7 +295,7 @@ func (gs *GPUDevices) FilterNode(pod *v1.Pod, schedulePolicy string) (int, strin
 func (gs *GPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error {
 	if VGPUEnable {
 		klog.V(4).Infoln("hami-vgpu DeviceSharing:Into AllocateToPod", pod.Name)
-		fit, device, _, err := checkNodeGPUSharingPredicateAndScore(pod, gs, false, "")
+		fit, device, _, err := checkNodeGPUSharingPredicateAndScore(pod, gs, false, SchedulePolicy)
 		if err != nil || !fit {
 			klog.ErrorS(err, "Failed to allocate vgpu task", "pod", pod.Name)
 			return err

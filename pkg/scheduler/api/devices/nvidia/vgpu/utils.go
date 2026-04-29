@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -368,7 +369,7 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 		}
 		klog.V(3).InfoS("Allocating device for container", "request", val)
 
-		for i := len(gs.Device) - 1; i >= 0; i-- {
+		for _, i := range sortedDeviceIndicesByPolicy(gs, schedulePolicy) {
 			klog.V(3).InfoS("Scoring pod request", "memReq", val.Memreq, "memPercentageReq", val.MemPercentagereq, "coresReq", val.Coresreq, "Nums", val.Nums, "Index", i, "ID", gs.Device[i].ID)
 			klog.V(3).InfoS("Current Device", "Index", i, "TotalMemory", gs.Device[i].Memory, "UsedMemory", gs.Device[i].UsedMem, "UsedCores", gs.Device[i].UsedCore, "replicate", replicate)
 			if gs.Device[i].Number <= uint(gs.Device[i].UsedNum) {
@@ -432,13 +433,47 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 	return true, ctrdevs, score, nil
 }
 
+func sortedDeviceIndicesByPolicy(gs *GPUDevices, schedulePolicy string) []int {
+	n := len(gs.Device)
+	idx := make([]int, 0, n)
+	switch schedulePolicy {
+	case binpackPolicy:
+		for i := range gs.Device {
+			idx = append(idx, i)
+		}
+		sort.Slice(idx, func(a, b int) bool {
+			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
+			if da.UsedMem != db.UsedMem {
+				return da.UsedMem > db.UsedMem
+			}
+			return idx[a] < idx[b]
+		})
+	case spreadPolicy:
+		for i := range gs.Device {
+			idx = append(idx, i)
+		}
+		sort.Slice(idx, func(a, b int) bool {
+			da, db := gs.Device[idx[a]], gs.Device[idx[b]]
+			if da.UsedNum != db.UsedNum {
+				return da.UsedNum < db.UsedNum
+			}
+			return idx[a] < idx[b]
+		})
+	default:
+		for i := n - 1; i >= 0; i-- {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
 func GPUScore(schedulePolicy string, device *GPUDevice) float64 {
 	var score float64
 	switch schedulePolicy {
 	case binpackPolicy:
 		score = binpackMultiplier * (float64(device.UsedMem) / float64(device.Memory))
 	case spreadPolicy:
-		if device.UsedNum == 1 {
+		if device.UsedNum == 0 {
 			score = spreadMultiplier
 		}
 	default:
