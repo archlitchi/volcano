@@ -38,11 +38,14 @@ func (f HAMICoreFactory) TryAddPod(gd *GPUDevice, mem uint, core uint) (bool, st
 
 func (f HAMICoreFactory) AddPod(gd *GPUDevice, mem uint, core uint, podUID string, devID string) error {
 	_, ok := gd.PodMap[podUID]
-	if !ok {
-		gd.PodMap[podUID] = &GPUUsage{
-			UsedMem:  0,
-			UsedCore: 0,
-		}
+	if ok {
+		// Keep AddPod idempotent in case the same pod allocation is replayed
+		// during cache/node refresh.
+		return nil
+	}
+	gd.PodMap[podUID] = &GPUUsage{
+		UsedMem:  0,
+		UsedCore: 0,
 	}
 	gd.UsedNum++
 	gd.UsedMem += mem

@@ -361,17 +361,46 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 	if pod.Annotations[VGPUPodGroupPolicyAnnotation] == VGPUPodGroupPolicySpreadValue {
 		currentPodGroupKey = getPodGroupKey(pod)
 	}
+
+	type tentativeAlloc struct {
+		device *GPUDevice
+		mem    uint
+		core   uint
+	}
+	rollbackTentative := func(allocs []tentativeAlloc) {
+		for _, alloc := range allocs {
+			if alloc.device == nil {
+				continue
+			}
+			if alloc.device.UsedNum > 0 {
+				alloc.device.UsedNum--
+			}
+			if alloc.device.UsedMem >= alloc.mem {
+				alloc.device.UsedMem -= alloc.mem
+			} else {
+				alloc.device.UsedMem = 0
+			}
+			if alloc.device.UsedCore >= alloc.core {
+				alloc.device.UsedCore -= alloc.core
+			} else {
+				alloc.device.UsedCore = 0
+			}
+		}
+	}
+
+	tentativeAllocs := []tentativeAlloc{}
 	ctrdevs := []ContainerDevices{}
 	for _, val := range ctrReq {
 		devs := []ContainerDevice{}
 		if int(val.Nums) > len(gs.Device) {
+			rollbackTentative(tentativeAllocs)
 			return false, []ContainerDevices{}, 0, fmt.Errorf("no enough gpu cards on node %s", gs.Name)
 		}
 		klog.V(3).InfoS("Allocating device for container", "request", val)
 
 		for _, i := range sortedDeviceIndicesByPolicy(gs, schedulePolicy) {
 			klog.V(3).InfoS("Scoring pod request", "memReq", val.Memreq, "memPercentageReq", val.MemPercentagereq, "coresReq", val.Coresreq, "Nums", val.Nums, "Index", i, "ID", gs.Device[i].ID)
-			klog.V(3).InfoS("Current Device", "Index", i, "TotalMemory", gs.Device[i].Memory, "UsedMemory", gs.Device[i].UsedMem, "UsedCores", gs.Device[i].UsedCore, "replicate", replicate)
+			klog.V(3).InfoS("Current Device", "Index", i, "TotalMemory", gs.Device[i].Memory, "UsedMemory", gs.Device[i].UsedMem, "UsedCores", gs.Device[i].UsedCore, "UsedNum", gs.Device[i].UsedNum, "Number", gs.Device[i].Number, "replicate", replicate)
 			if gs.Device[i].Number <= uint(gs.Device[i].UsedNum) {
 				continue
 			}
@@ -408,6 +437,11 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 				klog.V(3).Info(gs.Device[i].ID, "not fit")
 				continue
 			}
+			tentativeAllocs = append(tentativeAllocs, tentativeAlloc{
+				device: gs.Device[i],
+				mem:    memreqForCard,
+				core:   uint(val.Coresreq),
+			})
 			//total += gs.Devices[i].Count
 			//free += node.Devices[i].Count - node.Devices[i].Used
 			if val.Nums > 0 {
@@ -426,6 +460,7 @@ func checkNodeGPUSharingPredicateAndScore(pod *v1.Pod, gssnap *GPUDevices, repli
 			}
 		}
 		if val.Nums > 0 {
+			rollbackTentative(tentativeAllocs)
 			return false, []ContainerDevices{}, 0, fmt.Errorf("not enough gpu fitted on this node")
 		}
 		ctrdevs = append(ctrdevs, devs)

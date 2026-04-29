@@ -385,6 +385,44 @@ func (a *exclusiveGPUDevices) GetStatus() string {
 	return a.inner.GetStatus()
 }
 
+// DeepCopy returns a deep copy of exclusiveGPUDevices for use in dry-run simulation.
+// cfg, plugin, and nodeName are configuration/references shared safely; only the
+// mutable tracking maps and inner device state are deep-copied.
+func (a *exclusiveGPUDevices) DeepCopy() interface{} {
+	if a == nil {
+		return nil
+	}
+	cp := &exclusiveGPUDevices{
+		cfg:      a.cfg,
+		nodeName: a.nodeName,
+		plugin:   a.plugin,
+		ruleGPUs: make(map[int]map[int]struct{}, len(a.ruleGPUs)),
+		podRules: make(map[string]map[int]struct{}, len(a.podRules)),
+		podUIDs:  make(map[string]string, len(a.podUIDs)),
+	}
+	for ruleIdx, gpuSet := range a.ruleGPUs {
+		newSet := make(map[int]struct{}, len(gpuSet))
+		for g := range gpuSet {
+			newSet[g] = struct{}{}
+		}
+		cp.ruleGPUs[ruleIdx] = newSet
+	}
+	for podKey, ruleSet := range a.podRules {
+		newSet := make(map[int]struct{}, len(ruleSet))
+		for r := range ruleSet {
+			newSet[r] = struct{}{}
+		}
+		cp.podRules[podKey] = newSet
+	}
+	for k, v := range a.podUIDs {
+		cp.podUIDs[k] = v
+	}
+	if a.inner != nil {
+		cp.inner = a.inner.DeepCopy().(*vgpu.GPUDevices)
+	}
+	return cp
+}
+
 // wrapGPUDevicesForExclusivity wraps each node's GPUDevices with the exclusivity-aware
 // wrapper during OnSessionOpen. Called from deviceshare's OnSessionOpen.
 func (dp *deviceSharePlugin) wrapGPUDevicesForExclusivity(ssn *framework.Session) {
