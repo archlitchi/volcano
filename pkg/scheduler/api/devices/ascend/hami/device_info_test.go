@@ -748,7 +748,7 @@ func TestAllocateAddsNodeLockAscendWhenEnabled(t *testing.T) {
 			"device-1": createTestAscendAllocateDevice("device-1"),
 		},
 	}
-	err := ads.Allocate(client, pod)
+	_, err := ads.Allocate(client, pod)
 	assert.NoError(t, err)
 
 	gotNode, getErr := client.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
@@ -906,7 +906,8 @@ func TestHAMiReleaseCleansSpeculativeAnnotations(t *testing.T) {
 	client := fake.NewSimpleClientset(pod)
 	ads := &AscendDevices{NodeName: "node-a"}
 
-	if err := ads.Release(client, pod); err != nil {
+	reservation, err := ads.Release(client, pod)
+	if err != nil {
 		t.Fatalf("Release returned error: %v", err)
 	}
 
@@ -920,6 +921,12 @@ func TestHAMiReleaseCleansSpeculativeAnnotations(t *testing.T) {
 	} {
 		if _, ok := pod.Annotations[k]; ok {
 			t.Errorf("in-memory annotation %s should have been removed", k)
+		}
+		if reservation == nil || reservation.Annotations == nil {
+			t.Fatalf("Release should return annotation keys removed from TaskInfo.PodAnnotations")
+		}
+		if _, ok := reservation.Annotations[k]; !ok {
+			t.Errorf("reservation should request deletion of annotation %s", k)
 		}
 	}
 	if pod.Annotations["keep-me"] != "yes" {
@@ -946,7 +953,7 @@ func TestHAMiReleaseKeepsCommittedAnnotations(t *testing.T) {
 	client := fake.NewSimpleClientset(pod)
 	ads := &AscendDevices{NodeName: "node-a"}
 
-	if err := ads.Release(client, pod); err != nil {
+	if _, err := ads.Release(client, pod); err != nil {
 		t.Fatalf("Release returned error: %v", err)
 	}
 	if pod.Annotations[util.AssignedNodeAnnotations] != "node-a" {

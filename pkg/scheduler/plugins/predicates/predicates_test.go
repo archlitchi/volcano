@@ -124,6 +124,38 @@ func getWorkerAffinity() *apiv1.Affinity {
 	}
 }
 
+// TestTaskPodAnnotations verifies device allocation annotations flow through
+// TaskInfo's scheduler-owned Pod annotation map.
+func TestTaskPodAnnotations(t *testing.T) {
+	task := &api.TaskInfo{}
+
+	task.MergePodAnnotations(map[string]string{
+		"volcano.sh/vgpu-node":    "node-a",
+		"volcano.sh/vgpu-ids-new": "gpu-a",
+	})
+	got := task.PodAnnotations
+	if got["volcano.sh/vgpu-node"] != "node-a" {
+		t.Fatalf("expected vgpu-node=node-a, got %q", got["volcano.sh/vgpu-node"])
+	}
+
+	task.MergePodAnnotations(map[string]string{
+		"volcano.sh/vgpu-node": "node-b",
+	})
+	got = task.PodAnnotations
+	if got["volcano.sh/vgpu-node"] != "node-b" {
+		t.Fatalf("expected vgpu-node overwritten to node-b, got %q", got["volcano.sh/vgpu-node"])
+	}
+
+	task.DeletePodAnnotations("volcano.sh/vgpu-node")
+	got = task.PodAnnotations
+	if _, ok := got["volcano.sh/vgpu-node"]; ok {
+		t.Fatalf("expected vgpu-node removed")
+	}
+	if got["volcano.sh/vgpu-ids-new"] != "gpu-a" {
+		t.Fatalf("expected unrelated bind annotation preserved")
+	}
+}
+
 func TestEventHandler(t *testing.T) {
 	plugins := map[string]framework.PluginBuilder{
 		PluginName:          New,

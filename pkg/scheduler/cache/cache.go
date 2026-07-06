@@ -232,9 +232,10 @@ func (db *DefaultBinder) Bind(kubeClient kubernetes.Interface, tasks []*scheduli
 	for _, task := range tasks {
 		p := task.Pod
 		startTime := time.Now()
+		// The apiserver overlays Binding annotations onto the Pod during bind.
 		if err := db.kubeclient.CoreV1().Pods(p.Namespace).Bind(context.TODO(),
 			&v1.Binding{
-				ObjectMeta: metav1.ObjectMeta{Namespace: p.Namespace, Name: p.Name, UID: p.UID, Annotations: p.Annotations},
+				ObjectMeta: metav1.ObjectMeta{Namespace: p.Namespace, Name: p.Name, UID: p.UID, Annotations: task.PodAnnotations},
 				Target: v1.ObjectReference{
 					Kind: "Node",
 					Name: task.NodeName,

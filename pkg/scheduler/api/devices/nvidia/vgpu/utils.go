@@ -17,8 +17,6 @@ limitations under the License.
 package vgpu
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -26,9 +24,6 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	"volcano.sh/apis/pkg/apis/scheduling/v1beta1"
@@ -527,31 +522,6 @@ func GPUScore(schedulePolicy string, device *GPUDevice) float64 {
 		score = float64(0)
 	}
 	return score
-}
-
-func patchPodAnnotations(kubeClient kubernetes.Interface, pod *v1.Pod, annotations map[string]string) error {
-	type patchMetadata struct {
-		Annotations map[string]string `json:"annotations,omitempty"`
-	}
-	type patchPod struct {
-		Metadata patchMetadata `json:"metadata"`
-		//Spec     patchSpec     `json:"spec,omitempty"`
-	}
-
-	p := patchPod{}
-	p.Metadata.Annotations = annotations
-
-	bytes, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	_, err = kubeClient.CoreV1().Pods(pod.Namespace).
-		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		klog.Errorf("patch pod %v failed, %v", pod.Name, err)
-	}
-
-	return err
 }
 
 func getConfig() config.NvidiaConfig {

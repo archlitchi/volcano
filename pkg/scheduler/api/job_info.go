@@ -154,6 +154,22 @@ type TaskInfo struct {
 	NumaInfo *TopologyInfo
 	Pod      *v1.Pod
 
+	// PodAnnotations is the scheduler-owned annotation set that will be submitted
+	// with the Pod bind request.
+	//
+	// TaskInfo intentionally keeps Pod as a shared informer object instead of
+	// deep-copying the whole Pod during scheduler snapshots. Mutating
+	// Pod.Annotations from scheduling callbacks can race with informer event
+	// handling because the underlying map may still be shared with the cache.
+	// PodAnnotations is initialized from a cloned Pod.Annotations map and is the
+	// only mutable annotation state that scheduling plugins should use.
+	//
+	// This map is owned by one scheduling session. Plugins may merge final
+	// annotations after a node has been selected, such as in AllocateFunc, or
+	// immediately before the bind request is enqueued. Predicate callbacks that
+	// evaluate candidate nodes in parallel must not write to this map.
+	PodAnnotations map[string]string
+
 	// CustomBindErrHandler is a custom callback func called when task bind err.
 	CustomBindErrHandler func() error `json:"-"`
 	// CustomBindErrHandlerSucceeded indicates whether CustomBindErrHandler is executed successfully.
@@ -209,6 +225,7 @@ func NewTaskInfo(pod *v1.Pod) *TaskInfo {
 		TaskRole:                    role,
 		Priority:                    1,
 		Pod:                         pod,
+		PodAnnotations:              maps.Clone(pod.Annotations),
 		Resreq:                      resReq,
 		InitResreq:                  initResReq,
 		Preemptable:                 preemptable,
@@ -262,6 +279,25 @@ func calSchedulingGated(pod *v1.Pod) bool {
 	return false
 }
 
+func (ti *TaskInfo) MergePodAnnotations(annotations map[string]string) {
+	if ti == nil || len(annotations) == 0 {
+		return
+	}
+	if ti.PodAnnotations == nil {
+		ti.PodAnnotations = map[string]string{}
+	}
+	maps.Copy(ti.PodAnnotations, annotations)
+}
+
+func (ti *TaskInfo) DeletePodAnnotations(keys ...string) {
+	if ti == nil || ti.PodAnnotations == nil || len(keys) == 0 {
+		return
+	}
+	for _, key := range keys {
+		delete(ti.PodAnnotations, key)
+	}
+}
+
 func (ti *TaskInfo) SetPodResourceDecision() error {
 	if ti.NumaInfo == nil || len(ti.NumaInfo.ResMap) == 0 {
 		return nil
@@ -277,12 +313,12 @@ func (ti *TaskInfo) SetPodResourceDecision() error {
 		return err
 	}
 
-	metav1.SetMetaDataAnnotation(&ti.Pod.ObjectMeta, topologyDecisionAnnotation, string(layout[:]))
+	ti.MergePodAnnotations(map[string]string{topologyDecisionAnnotation: string(layout)})
 	return nil
 }
 
 func (ti *TaskInfo) UnsetPodResourceDecision() {
-	delete(ti.Pod.Annotations, topologyDecisionAnnotation)
+	ti.DeletePodAnnotations(topologyDecisionAnnotation)
 }
 
 // Clone is used for cloning a task
@@ -295,6 +331,7 @@ func (ti *TaskInfo) Clone() *TaskInfo {
 		TaskRole:                    ti.TaskRole,
 		Priority:                    ti.Priority,
 		Pod:                         ti.Pod,
+		PodAnnotations:              maps.Clone(ti.PodAnnotations),
 		Resreq:                      ti.Resreq.Clone(),
 		InitResreq:                  ti.InitResreq.Clone(),
 		VolumeReady:                 ti.VolumeReady,
@@ -323,7 +360,6 @@ func (ti *TaskInfo) Clone() *TaskInfo {
 	if ti.ResourceClaimDRAResreq != nil {
 		res.ResourceClaimDRAResreq = cloneResourceClaimDRAResreq(ti.ResourceClaimDRAResreq)
 	}
-
 	return res
 }
 

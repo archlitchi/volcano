@@ -179,17 +179,17 @@ func (ns *NPUDevices) ScoreNode(pod *v1.Pod, schedulePolicy string) float64 {
 	return 0
 }
 
-func (ns *NPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+func (ns *NPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
 	klog.V(4).Infoln("DeviceSharing:Into AllocateToPod", pod.Name)
 	if ns == nil {
 		klog.V(LogDebugLev).Infof("UseAnnotation failed: %s", ArgumentError)
-		return errors.New(ArgumentError)
+		return nil, errors.New(ArgumentError)
 	}
 
 	podResReq, err := ns.GetPodResource(pod)
 	if err != nil {
 		klog.V(LogErrorLev).Infof("%s UseAnnotation get require task resource failed: %s", ns.Name, err)
-		return err
+		return nil, err
 	}
 
 	_, ok := ns.DowngradeCache[pod.Name]
@@ -200,27 +200,30 @@ func (ns *NPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) err
 	allocChipID, err := ns.SelectChipFromNode(podResReq)
 	if err != nil {
 		klog.V(LogErrorLev).Infof("UseAnnotation dynamic %s on %s err: %s", pod.Name, ns.NodeInf.Name, err)
-		return err
+		return nil, err
 	}
 	klog.V(LogDebugLev).Infof("dynamic vnpu UseAnnotation allocChipID:<%s>", allocChipID)
 	ns.SetNPUTopologyToPodFn(kubeClient, pod, podResReq, allocChipID, ns.VT)
-	return nil
+	return nil, nil
 }
 
-func (ns *NPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+func (ns *NPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
 	if ns == nil || pod == nil || pod.Annotations == nil {
-		return nil
+		return nil, nil
 	}
 	ns.SubResource(pod)
 
 	keys := []string{PodPredicateTime, AscendNPUCore}
 	if err := devices.RemovePodAnnotations(kubeClient, pod, keys); err != nil {
-		return err
+		return nil, err
 	}
 	for _, k := range keys {
 		delete(pod.Annotations, k)
 	}
-	return nil
+	return &devices.DeviceReservation{
+		DeviceType:  DeviceName,
+		Annotations: devices.AnnotationKeyMap(keys),
+	}, nil
 }
 
 func (ns *NPUDevices) GetStatus() string {

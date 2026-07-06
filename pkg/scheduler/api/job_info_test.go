@@ -814,3 +814,73 @@ func TestGetMinDRAResourcesFallbackWithoutTaskMinAvailable(t *testing.T) {
 		},
 	}, job.GetMinDRAResources())
 }
+
+func TestTaskInfoPodAnnotations(t *testing.T) {
+	tests := []struct {
+		name        string
+		task        *TaskInfo
+		existing    map[string]string
+		annotations map[string]string
+		want        map[string]string
+	}{
+		{
+			name:        "nil task ignores annotations",
+			task:        nil,
+			annotations: map[string]string{"gpu.volcano.sh/device": "0"},
+			want:        nil,
+		},
+		{
+			name:        "stores annotations on empty task",
+			task:        &TaskInfo{},
+			annotations: map[string]string{"gpu.volcano.sh/device": "0", "gpu.volcano.sh/memory": "16Gi"},
+			want:        map[string]string{"gpu.volcano.sh/device": "0", "gpu.volcano.sh/memory": "16Gi"},
+		},
+		{
+			name:        "merges annotations and overwrites existing keys",
+			task:        &TaskInfo{},
+			existing:    map[string]string{"gpu.volcano.sh/device": "0"},
+			annotations: map[string]string{"gpu.volcano.sh/device": "1", "gpu.volcano.sh/memory": "16Gi"},
+			want:        map[string]string{"gpu.volcano.sh/device": "1", "gpu.volcano.sh/memory": "16Gi"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.task != nil && tt.existing != nil {
+				tt.task.MergePodAnnotations(tt.existing)
+			}
+
+			assert.NotPanics(t, func() {
+				tt.task.MergePodAnnotations(tt.annotations)
+			})
+
+			if tt.task == nil {
+				return
+			}
+			assert.Equal(t, tt.want, tt.task.PodAnnotations)
+		})
+	}
+}
+
+func TestTaskInfoPodAnnotationsAreCloned(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"keep": "original"},
+		},
+	}
+	task := NewTaskInfo(pod)
+
+	task.MergePodAnnotations(map[string]string{"keep": "task", "new": "value"})
+
+	assert.Equal(t, "original", pod.Annotations["keep"])
+	assert.NotContains(t, pod.Annotations, "new")
+
+	cloned := task.Clone()
+	cloned.MergePodAnnotations(map[string]string{"keep": "clone"})
+	cloned.DeletePodAnnotations("new")
+
+	assert.Equal(t, "task", task.PodAnnotations["keep"])
+	assert.Equal(t, "value", task.PodAnnotations["new"])
+	assert.Equal(t, "clone", cloned.PodAnnotations["keep"])
+	assert.NotContains(t, cloned.PodAnnotations, "new")
+}

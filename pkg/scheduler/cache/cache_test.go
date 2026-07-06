@@ -33,6 +33,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	kubetesting "k8s.io/client-go/testing"
 	kcache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
@@ -170,6 +172,59 @@ func TestSchedulerCache_Bind_NodeWithSufficientResources(t *testing.T) {
 	err := cache.AddBindTask(bindContext)
 	if err != nil {
 		t.Errorf("failed to bind pod to node: %v", err)
+	}
+}
+
+func TestDefaultBinderBindUsesTaskPodAnnotations(t *testing.T) {
+	pod := buildPod("default", "worker-0", "", v1.PodPending, nil, nil, nil)
+	pod.Annotations = map[string]string{"keep": "pod"}
+	task := api.NewTaskInfo(pod)
+	task.NodeName = "node-a"
+	task.MergePodAnnotations(map[string]string{
+		"keep":                  "task",
+		"volcano.sh/vgpu-node":  "node-a",
+		"volcano.sh/vgpu-ids":   "GPU-aaaa",
+		"volcano.sh/bind-phase": "allocating",
+	})
+
+	kubeClient := kubefake.NewSimpleClientset(pod)
+	binder := NewDefaultBinder(kubeClient, record.NewFakeRecorder(10))
+
+	errMsg := binder.Bind(kubeClient, []*api.TaskInfo{task})
+	if len(errMsg) > 0 {
+		t.Fatalf("Bind returned errors: %v", errMsg)
+	}
+
+	var binding *v1.Binding
+	for _, action := range kubeClient.Actions() {
+		if action.GetVerb() != "create" || action.GetSubresource() != "binding" {
+			continue
+		}
+		createAction, ok := action.(kubetesting.CreateAction)
+		if !ok {
+			t.Fatalf("expected create binding action, got %T", action)
+		}
+		var okBinding bool
+		binding, okBinding = createAction.GetObject().(*v1.Binding)
+		if !okBinding {
+			t.Fatalf("expected Binding object, got %T", createAction.GetObject())
+		}
+		break
+	}
+	if binding == nil {
+		t.Fatalf("expected binder to create a Pod binding")
+	}
+	if binding.Target.Name != "node-a" {
+		t.Fatalf("expected binding target node-a, got %q", binding.Target.Name)
+	}
+	if binding.Annotations["keep"] != "task" {
+		t.Fatalf("expected binding annotations to overwrite existing annotations, got %q", binding.Annotations["keep"])
+	}
+	if binding.Annotations["volcano.sh/vgpu-node"] != "node-a" {
+		t.Fatalf("expected vgpu annotation on binding, got %q", binding.Annotations["volcano.sh/vgpu-node"])
+	}
+	if binding.Annotations["volcano.sh/bind-phase"] != "allocating" {
+		t.Fatalf("expected bind phase annotation on binding, got %q", binding.Annotations["volcano.sh/bind-phase"])
 	}
 }
 

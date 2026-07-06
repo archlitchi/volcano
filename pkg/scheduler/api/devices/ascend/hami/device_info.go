@@ -315,18 +315,18 @@ func (ads *AscendDevices) ScoreNode(pod *v1.Pod, policy string) float64 {
 	return score
 }
 
-func (ads *AscendDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+func (ads *AscendDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
 	klog.V(4).Infof("Allocate device %s to Pod %s", ads.Type, pod.Name)
 	if NodeLockEnable {
 		nodelock.UseClient(kubeClient)
 		err := nodelock.LockNode(ads.NodeName, NodeLockAscend)
 		if err != nil {
-			return errors.Errorf("node %s locked for %s. err: %s", ads.NodeName, pod.Name, err.Error())
+			return nil, errors.Errorf("node %s locked for %s hami vnpu. lockname %s", ads.NodeName, pod.Name, err.Error())
 		}
 	}
 	podDevs, err := ads.selectDevices(pod, ads.Policy)
 	if err != nil {
-		return errors.Errorf("failed to select ascend devices for pod %s: %v", pod.Name, err)
+		return nil, errors.Errorf("failed to select ascend devices for pod %s: %v", pod.Name, err)
 	}
 	annotations := ads.CreateAnnotations(pod, podDevs)
 
@@ -338,19 +338,19 @@ func (ads *AscendDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod)
 
 	err = devices.PatchPodAnnotations(kubeClient, pod, annotations)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	klog.V(4).Infof("Allocate Success. device %s Pod %s", ads.Type, pod.Name)
-	return nil
+	return nil, nil
 }
 
-func (ads *AscendDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) error {
+func (ads *AscendDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
 	if ads == nil || pod == nil || pod.Annotations == nil {
-		return nil
+		return nil, nil
 	}
 	ads.SubResource(pod)
 	if pod.Annotations[util.DeviceBindPhase] == DeviceBindSuccess {
-		return nil
+		return nil, nil
 	}
 	keys := []string{
 		util.AssignedNodeAnnotations,
@@ -367,12 +367,15 @@ func (ads *AscendDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) 
 		)
 	}
 	if err := devices.RemovePodAnnotations(kubeClient, pod, keys); err != nil {
-		return err
+		return nil, err
 	}
 	for _, k := range keys {
 		delete(pod.Annotations, k)
 	}
-	return nil
+	return &devices.DeviceReservation{
+		DeviceType:  ads.Type,
+		Annotations: devices.AnnotationKeyMap(keys),
+	}, nil
 }
 
 func (ads *AscendDevices) GetIgnoredDevices() []string {
