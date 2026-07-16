@@ -290,7 +290,6 @@ func (gs *GPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*de
 		return nil, nil
 	}
 
-	// Clean allocation annotations persisted to the apiserver.
 	keys := []string{
 		AssignedNodeAnnotations,          // volcano.sh/vgpu-node
 		AssignedIDsAnnotations,           // volcano.sh/vgpu-ids-new
@@ -298,9 +297,6 @@ func (gs *GPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*de
 		AssignedTimeAnnotations,          // volcano.sh/vgpu-time
 		BindTimeAnnotations,              // volcano.sh/bind-time
 		DeviceBindPhase,                  // volcano.sh/bind-phase
-	}
-	if err := devices.RemovePodAnnotations(kubeClient, pod, keys); err != nil {
-		return nil, err
 	}
 	return &devices.DeviceReservation{
 		DeviceType:  DeviceName,

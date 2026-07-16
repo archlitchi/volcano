@@ -217,10 +217,9 @@ func podWithVGPUAnnotations(phase string) *v1.Pod {
 	}
 }
 
-// TestReleaseCleansSpeculativeAnnotations verifies that Release cleans apiserver annotations
-// without mutating the in-memory Pod annotation map. This avoids concurrent map writes on
-// shared Pod objects.
-func TestReleaseCleansSpeculativeAnnotations(t *testing.T) {
+// TestReleaseReturnsSpeculativeAnnotationKeys verifies that Release only reports
+// the speculative annotation keys that should be removed from TaskInfo.PodAnnotations.
+func TestReleaseReturnsSpeculativeAnnotationKeys(t *testing.T) {
 	pod := podWithVGPUAnnotations("allocating")
 	client := fake.NewSimpleClientset(pod)
 	gs := &GPUDevices{Name: "node-a"}
@@ -230,7 +229,6 @@ func TestReleaseCleansSpeculativeAnnotations(t *testing.T) {
 		t.Fatalf("Release returned error: %v", err)
 	}
 
-	// Release removes annotations from the apiserver via RemovePodAnnotations.
 	got, err := client.CoreV1().Pods("default").Get(context.Background(), "worker-0", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("get pod: %v", err)
@@ -239,8 +237,8 @@ func TestReleaseCleansSpeculativeAnnotations(t *testing.T) {
 		AssignedNodeAnnotations, AssignedIDsAnnotations,
 		AssignedIDsToAllocateAnnotations, DeviceBindPhase,
 	} {
-		if _, ok := got.Annotations[k]; ok {
-			t.Errorf("apiserver annotation %s should have been removed", k)
+		if _, ok := got.Annotations[k]; !ok {
+			t.Errorf("apiserver annotation %s should not be removed during Release", k)
 		}
 		if reservation == nil || reservation.Annotations == nil {
 			t.Fatalf("Release should return annotation keys removed from TaskInfo.PodAnnotations")
@@ -252,9 +250,6 @@ func TestReleaseCleansSpeculativeAnnotations(t *testing.T) {
 	if got.Annotations["keep-me"] != "yes" {
 		t.Errorf("non-device annotation must be preserved on apiserver")
 	}
-
-	// Release no longer mutates the in-memory Pod annotation map.
-	// Device allocation annotations flow through TaskInfo.PodAnnotations and bind carry.
 }
 
 // A committed/running pod (device plugin set bind-phase=success) must NOT be stripped,

@@ -85,7 +85,10 @@ func (ns *NPUDevices) AddResource(pod *v1.Pod) {
 	if !ns.HasDeviceRequest(pod) {
 		return
 	}
+	ns.addResource(pod.Annotations, pod)
+}
 
+func (ns *NPUDevices) addResource(annotations map[string]string, pod *v1.Pod) {
 	//Upper level mechanism has assured that the pod(task) has been scheduled to this node
 	//Judge if the pod has resource request on this device
 	podRes, err := ns.GetPodResource(pod)
@@ -94,10 +97,14 @@ func (ns *NPUDevices) AddResource(pod *v1.Pod) {
 			ns.NodeInf.Name, err)
 	}
 
-	coreAnnotation, ok := pod.Annotations[AscendNPUCore]
+	coreAnnotation, ok := annotations[AscendNPUCore]
 	if !ok {
 		return
 	}
+	if ns.PodAllocation == nil {
+		ns.PodAllocation = make(map[types.UID]string)
+	}
+	ns.PodAllocation[pod.UID] = coreAnnotation
 	ascendNPUCoreSplit := strings.Split(coreAnnotation, "-")
 
 	var allocChipID, chipVTemplate string
@@ -130,8 +137,12 @@ func (ns *NPUDevices) SubResource(pod *v1.Pod) {
 
 	coreAnnotation, ok := pod.Annotations[AscendNPUCore]
 	if !ok {
-		return
+		coreAnnotation, ok = ns.PodAllocation[pod.UID]
+		if !ok {
+			return
+		}
 	}
+	delete(ns.PodAllocation, pod.UID)
 
 	ascendNPUCoreSplit := strings.Split(coreAnnotation, "-")
 
@@ -203,23 +214,21 @@ func (ns *NPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) (*d
 		return nil, err
 	}
 	klog.V(LogDebugLev).Infof("dynamic vnpu UseAnnotation allocChipID:<%s>", allocChipID)
-	ns.SetNPUTopologyToPodFn(kubeClient, pod, podResReq, allocChipID, ns.VT)
-	return nil, nil
+	annotations := ns.BuildNPUTopologyAnnotations(pod, podResReq, allocChipID, ns.VT)
+	ns.addResource(annotations, pod)
+	return &devices.DeviceReservation{
+		DeviceType:  DeviceName,
+		Annotations: annotations,
+	}, nil
 }
 
 func (ns *NPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
-	if ns == nil || pod == nil || pod.Annotations == nil {
+	if ns == nil || pod == nil {
 		return nil, nil
 	}
 	ns.SubResource(pod)
 
 	keys := []string{PodPredicateTime, AscendNPUCore}
-	if err := devices.RemovePodAnnotations(kubeClient, pod, keys); err != nil {
-		return nil, err
-	}
-	for _, k := range keys {
-		delete(pod.Annotations, k)
-	}
 	return &devices.DeviceReservation{
 		DeviceType:  DeviceName,
 		Annotations: devices.AnnotationKeyMap(keys),
@@ -292,6 +301,7 @@ func (ns *NPUDevices) DeepCopy() interface{} {
 		UnhealthyChipIds: make(map[int]struct{}, len(ns.NPUDevice.UnhealthyChipIds)),
 		DowngradeCache:   make(map[string]struct{}, len(ns.NPUDevice.DowngradeCache)),
 		ConCache:         make(map[string]map[types.UID]struct{}, len(ns.NPUDevice.ConCache)),
+		PodAllocation:    make(map[types.UID]string, len(ns.NPUDevice.PodAllocation)),
 	}
 	for k, v := range ns.NPUDevice.VT.Data {
 		cp.NPUDevice.VT.Data[k] = v
@@ -308,6 +318,9 @@ func (ns *NPUDevices) DeepCopy() interface{} {
 			newInner[uid] = struct{}{}
 		}
 		cp.NPUDevice.ConCache[k] = newInner
+	}
+	for uid, coreAnnotation := range ns.NPUDevice.PodAllocation {
+		cp.NPUDevice.PodAllocation[uid] = coreAnnotation
 	}
 	for id, chip := range ns.NPUDevice.Chips {
 		newChip := &VChip{

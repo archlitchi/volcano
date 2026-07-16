@@ -180,6 +180,7 @@ func (ads *AscendDevices) SubResource(pod *v1.Pod) {
 	ano_key := devices.SupportDevices[ads.Type]
 	ano, ok := pod.Annotations[ano_key]
 	if !ok {
+		ads.subResourceByUID(pod)
 		return
 	}
 	con_devs, err := devices.DecodeContainerDevices(ano)
@@ -198,6 +199,21 @@ func (ads *AscendDevices) SubResource(pod *v1.Pod) {
 			ads.SubResourceUsage(dev, cono_dev.Usedcores, cono_dev.Usedmem)
 			klog.V(5).Infof("sub resource usage for pod %s. device %s usedmem %d usedcore %d", pod.Name, dev.DeviceInfo.ID, cono_dev.Usedmem, cono_dev.Usedcores)
 		}
+	}
+}
+
+func (ads *AscendDevices) subResourceByUID(pod *v1.Pod) {
+	if pod == nil {
+		return
+	}
+	for _, dev := range ads.Devices {
+		usage, ok := dev.PodMap[string(pod.UID)]
+		if !ok {
+			continue
+		}
+		delete(dev.PodMap, string(pod.UID))
+		ads.SubResourceUsage(dev, usage.Usedcores, usage.Usedmem)
+		klog.V(5).Infof("sub resource usage for pod %s by uid. device %s usedmem %d usedcore %d", pod.Name, dev.DeviceInfo.ID, usage.Usedmem, usage.Usedcores)
 	}
 }
 
@@ -336,16 +352,15 @@ func (ads *AscendDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod)
 	annotations[util.DeviceBindPhase] = "allocating"
 	annotations[util.BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
-	err = devices.PatchPodAnnotations(kubeClient, pod, annotations)
-	if err != nil {
-		return nil, err
-	}
 	klog.V(4).Infof("Allocate Success. device %s Pod %s", ads.Type, pod.Name)
-	return nil, nil
+	return &devices.DeviceReservation{
+		DeviceType:  ads.Type,
+		Annotations: annotations,
+	}, nil
 }
 
 func (ads *AscendDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
-	if ads == nil || pod == nil || pod.Annotations == nil {
+	if ads == nil || pod == nil {
 		return nil, nil
 	}
 	ads.SubResource(pod)
@@ -365,12 +380,6 @@ func (ads *AscendDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) 
 			devices.SupportDevices[commonWord],
 			fmt.Sprintf("huawei.com/%s", commonWord),
 		)
-	}
-	if err := devices.RemovePodAnnotations(kubeClient, pod, keys); err != nil {
-		return nil, err
-	}
-	for _, k := range keys {
-		delete(pod.Annotations, k)
 	}
 	return &devices.DeviceReservation{
 		DeviceType:  ads.Type,

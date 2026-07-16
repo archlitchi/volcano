@@ -888,9 +888,11 @@ func (pp *PredicatesPlugin) PreBindRollBack(ctx context.Context, bindCtx *cache.
 }
 
 func (pp *PredicatesPlugin) SetupBindContextExtension(state *k8sframework.CycleState, bindCtx *cache.BindContext) {
-	if pp.needsPreBind(bindCtx.TaskInfo) {
-		bindCtx.Extensions[pp.Name()] = &BindContextExtension{State: state}
+	if !pp.needsPreBind(bindCtx.TaskInfo) {
+		return
 	}
+
+	bindCtx.Extensions[pp.Name()] = &BindContextExtension{State: state}
 }
 
 func handleSkipPredicatePlugin(state fwk.CycleState, pluginName string) bool {

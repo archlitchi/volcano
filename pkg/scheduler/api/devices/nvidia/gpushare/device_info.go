@@ -17,13 +17,10 @@ limitations under the License.
 package gpushare
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
@@ -115,11 +112,23 @@ func (gs *GPUDevices) SubResource(pod *v1.Pod) {
 	gpuRes := getGPUMemoryOfPod(pod)
 	gpuNumRes := getGPUNumberOfPod(pod)
 	if gpuRes > 0 || gpuNumRes > 0 {
-		ids := GetGPUIndex(pod)
-		for _, id := range ids {
-			if dev := gs.Device[id]; dev != nil {
-				delete(dev.PodMap, string(pod.UID))
-			}
+		gs.removePodFromDeviceMap(pod, GetGPUIndex(pod))
+	}
+}
+
+func (gs *GPUDevices) removePodFromDeviceMap(pod *v1.Pod, ids []int) {
+	if pod == nil {
+		return
+	}
+	if len(ids) == 0 {
+		for _, dev := range gs.Device {
+			delete(dev.PodMap, string(pod.UID))
+		}
+		return
+	}
+	for _, id := range ids {
+		if dev := gs.Device[id]; dev != nil {
+			delete(dev.PodMap, string(pod.UID))
 		}
 	}
 }
@@ -137,18 +146,11 @@ func (gs *GPUDevices) AddQueueResource(pod *v1.Pod) map[string]float64 {
 }
 
 func (gs *GPUDevices) Release(kubeClient kubernetes.Interface, pod *v1.Pod) (*devices.DeviceReservation, error) {
+	if pod == nil {
+		return nil, nil
+	}
 	ids := GetGPUIndex(pod)
-	patch := RemoveGPUIndexPatch()
-	_, err := kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-	if err != nil {
-		return nil, errors.Errorf("patch pod %s failed with patch %s: %v", pod.Name, patch, err)
-	}
-
-	for _, id := range ids {
-		if dev, ok := gs.Device[id]; ok {
-			delete(dev.PodMap, string(pod.UID))
-		}
-	}
+	gs.removePodFromDeviceMap(pod, ids)
 
 	klog.V(4).Infof("predicates with gpu sharing, update pod %s/%s deallocate from node [%s]", pod.Namespace, pod.Name, gs.Name)
 	return &devices.DeviceReservation{
@@ -223,27 +225,21 @@ func (gs *GPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) (*d
 			return nil, errors.Errorf("the node %s can't place the pod %s in ns %s", pod.Spec.NodeName, pod.Name, pod.Namespace)
 		}
 		id := ids[0]
-		patch := AddGPUIndexPatch([]int{id})
-		pod, err := kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-		if err != nil {
-			return nil, errors.Errorf("patch pod %s failed with patch %s: %v", pod.Name, patch, err)
-		}
 		dev, ok := gs.Device[id]
 		if !ok {
 			return nil, errors.Errorf("failed to get GPU %d from node %s", id, gs.Name)
 		}
 		dev.PodMap[string(pod.UID)] = pod
 		klog.V(4).Infof("predicates with gpu sharing, update pod %s/%s allocate to node [%s]", pod.Namespace, pod.Name, gs.Name)
+		return &devices.DeviceReservation{
+			DeviceType:  DeviceName,
+			Annotations: gpuIndexAnnotations([]int{id}),
+		}, nil
 	}
 	if getGPUNumberOfPod(pod) > 0 {
 		ids := predicateGPUbyNumber(pod, gs)
 		if len(ids) == 0 {
 			return nil, errors.Errorf("the node %s can't place the pod %s in ns %s", pod.Spec.NodeName, pod.Name, pod.Namespace)
-		}
-		patch := AddGPUIndexPatch(ids)
-		pod, err := kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-		if err != nil {
-			return nil, errors.Errorf("patch pod %s failed with patch %s: %v", pod.Name, patch, err)
 		}
 		for _, id := range ids {
 			dev, ok := gs.Device[id]
@@ -253,6 +249,10 @@ func (gs *GPUDevices) Allocate(kubeClient kubernetes.Interface, pod *v1.Pod) (*d
 			dev.PodMap[string(pod.UID)] = pod
 		}
 		klog.V(4).Infof("predicates with gpu number, update pod %s/%s allocate to node [%s]", pod.Namespace, pod.Name, gs.Name)
+		return &devices.DeviceReservation{
+			DeviceType:  DeviceName,
+			Annotations: gpuIndexAnnotations(ids),
+		}, nil
 	}
 	return nil, nil
 }
