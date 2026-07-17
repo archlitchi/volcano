@@ -31,6 +31,9 @@ func TestRunningStateExecute(t *testing.T) {
 		return nil
 	}
 
+	// Execute only runs while the jobflow sits in Running, so every case starts there.
+	running := v1alpha1.State{Phase: v1alpha1.Running}
+
 	tests := []struct {
 		name   string
 		status v1alpha1.JobFlowStatus
@@ -39,21 +42,27 @@ func TestRunningStateExecute(t *testing.T) {
 	}{
 		{
 			name:   "all jobs completed settles to Succeed",
-			status: v1alpha1.JobFlowStatus{CompletedJobs: []string{"job-a"}},
+			status: v1alpha1.JobFlowStatus{State: running, CompletedJobs: []string{"job-a"}},
 			flows:  1,
 			want:   v1alpha1.Succeed,
 		},
 		{
 			name:   "a failed job settles to Failed",
-			status: v1alpha1.JobFlowStatus{FailedJobs: []string{"job-a"}},
+			status: v1alpha1.JobFlowStatus{State: running, FailedJobs: []string{"job-a"}},
 			flows:  1,
 			want:   v1alpha1.Failed,
 		},
 		{
 			name:   "a terminated job settles to Failed",
-			status: v1alpha1.JobFlowStatus{TerminatedJobs: []string{"job-a"}},
+			status: v1alpha1.JobFlowStatus{State: running, TerminatedJobs: []string{"job-a"}},
 			flows:  1,
 			want:   v1alpha1.Failed,
+		},
+		{
+			name:   "not every job is done yet so it stays Running",
+			status: v1alpha1.JobFlowStatus{State: running, CompletedJobs: []string{"job-a"}},
+			flows:  2,
+			want:   v1alpha1.Running,
 		},
 	}
 
