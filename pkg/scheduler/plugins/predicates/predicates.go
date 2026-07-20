@@ -238,11 +238,14 @@ func (pp *PredicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 						continue
 					}
 
-					err := devices.Allocate(ssn.KubeClient(), pod)
+					reservation, err := devices.Allocate(ssn.KubeClient(), pod)
 					if err != nil {
 						klog.Errorf("AllocateToPod failed %s", err.Error())
 						event.Err = err
 						return
+					}
+					if reservation != nil && len(reservation.Annotations) > 0 {
+						event.Task.MergePodAnnotations(reservation.Annotations)
 					}
 				} else {
 					klog.Warningf("Devices %s assertion conversion failed, skip", val)
@@ -284,10 +287,15 @@ func (pp *PredicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 					}
 
 					// deallocate pod gpu id
-					err := devices.Release(ssn.KubeClient(), pod)
+					reservation, err := devices.Release(ssn.KubeClient(), pod)
 					if err != nil {
 						klog.Errorf("Device %s release failed for pod %s/%s, err:%s", val, pod.Namespace, pod.Name, err.Error())
 						return
+					}
+					if reservation != nil {
+						if keys := reservation.AnnotationKeys(); len(keys) > 0 {
+							event.Task.DeletePodAnnotations(keys...)
+						}
 					}
 				} else {
 					klog.Warningf("Devices %s assertion conversion failed, skip", val)
