@@ -115,98 +115,34 @@ data:
 
 #### HAMi mode
 
-##### Template vNPU mode
-
-###### Label the Node with `ascend=on`
+##### Label the Node with `ascend=on`
 
 ```
 kubectl label node {ascend-node} ascend=on
 ```
 
-###### Deploy `hami-scheduler-device` ConfigMap
-
-```
-kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-configmap.yaml
-```
-
-###### Deploy ascend-device-plugin
-
-```
-kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
-```
-
-For more information, refer to the [ascend-device-plugin documentation](https://github.com/Project-HAMi/ascend-device-plugin).
-
-###### Update Scheduler Config
-```yaml
-kind: ConfigMap
-apiVersion: v1
-metadata:
-  name: volcano-scheduler-configmap
-  namespace: volcano-system
-data:
-  volcano-scheduler.conf: |
-    actions: "enqueue, allocate, backfill"
-    tiers:
-    - plugins:
-      - name: predicates
-      - name: deviceshare
-        arguments:
-          deviceshare.AscendHAMiVNPUEnable: true   # enable ascend vnpu
-          deviceshare.SchedulePolicy: binpack  # scheduling policy. binpack / spread
-          deviceshare.KnownGeometriesCMNamespace: kube-system
-          deviceshare.KnownGeometriesCMName: hami-scheduler-device
-```
-
-  **Note:** You may notice that, 'volcano-vgpu' has its own GeometriesCMName and GeometriesCMNamespace, which means if you want to use both vNPU and vGPU in a same volcano cluster, you need to merge the configMap from both sides and set it here.
-
-##### `hami-core` mode
-
-###### Label the Node with `ascend=on`
-
-```
-kubectl label node {ascend-node} ascend=on
-```
-
-###### Deploy `hami-scheduler-device` ConfigMap
+##### Deploy `hami-scheduler-device` ConfigMap
 
 1. Download file
 ```
-curl -O https://github.com/Project-HAMi/ascend-device-plugin/blob/main/ascend-device-configmap.yaml
+curl -O https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/main/ascend-device-configmap.yaml
 ```
-2. Set `hamiVnpuCore` to `true`
+2. (Optional) Set `hamiVnpuCore` to `true` if you want to enable `hami-vnpu-core`
 3. Deploy the yaml
 
 ```
 kubectl apply -f ascend-device-configmap.yaml
 ```
 
-###### Deploy `hami-device-node-config` ConfigMap
-1. Download file
-```
-curl -O https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/main/ascend-device-node-configmap.yaml
-```
-2. Set the `name` field under the `nodes` block to the actual node name.
-3. Deploy the yaml
-```
-kubectl apply -f ascend-device-node-configmap.yaml
-```
-
-###### Deploy ascend-device-plugin
+##### Deploy ascend-device-plugin
 
 ```
-kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
+kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/main/ascend-device-plugin.yaml
 ```
 
-###### Upgrade volcano-adminssion
-```
-helm upgrade [RELEASE_NAME] [CHART_PATH] --set custom.device_mutator_enable=true \
-    --set custom.enabled_admissions='/jobs/mutate\,/jobs/validate\,/podgroups/validate\,/queues/mutate\,/queues/validate\,/hypernodes/validate\,/cronjobs/validate\,/pods/mutate'
-kubectl rollout restart deployment -n [VOLCANO_NAMESPACE] volcano-admission
-```
-**Note**: If you deployed Volcano using a Deployment YAML, you need to either generate a new YAML with Helm using the parameters above and deploy it, or uninstall the existing Volcano and redeploy it with Helm.
+For more information, refer to the [ascend-device-plugin documentation](https://github.com/Project-HAMi/ascend-device-plugin).
 
-###### Update Scheduler Config
+##### Update Scheduler Config
 ```yaml
 kind: ConfigMap
 apiVersion: v1
